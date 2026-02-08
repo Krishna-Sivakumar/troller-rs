@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="{{width}}" height="{{height}}" fill="none">
+  <circle cx="100" cy="100" r="90" stroke="white" stroke-width="3" fill="transparent"/>
+  {{#each angle}}
+  <line x1="100" y1="100" x2="100" y2="10" transform="rotate({{this}} 100 100)" stroke="white" stroke-width="2"/>
+  {{/each}}
+</svg>
