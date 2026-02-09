@@ -2,11 +2,14 @@ use handlebars::Handlebars;
 use resvg::usvg::Options;
 use resvg::{render, tiny_skia::Pixmap, usvg::Tree};
 use std::collections::HashMap;
+use std::f32::consts::PI;
 
-static SVG_FILE: &str = include_str!("./source.svg.template");
+static SVG_FILE: &str = include_str!("./source.svg");
 
+#[derive(Debug)]
 enum RenderDataTypes {
     Int(i32),
+    Float(f32),
     FloatList(Vec<f32>),
 }
 
@@ -16,13 +19,22 @@ impl serde::Serialize for RenderDataTypes {
         S: serde::Serializer,
     {
         match self {
-            Self::FloatList(flt) => flt.serialize(serializer),
+            Self::FloatList(floats) => floats.serialize(serializer),
             Self::Int(int) => int.serialize(serializer),
+            Self::Float(float) => float.serialize(serializer),
         }
     }
 }
 
-pub fn render_progress_clock(segments: u8) -> Result<(), String> {
+pub fn render_progress_clock(
+    segments: u8,
+    segments_filled: u8,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    dbg!("{segments} {segments_filled}");
+    if segments_filled > segments {
+        return Err(String::from("segments filled must be lesser than existing segments.").into());
+    }
+
     let mut handlebars = Handlebars::new();
 
     handlebars
@@ -30,21 +42,41 @@ pub fn render_progress_clock(segments: u8) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     let angle_segment: f32 = 360f32 / f32::from(segments);
-    let mut angles: Vec<f32> = vec![angle_segment];
+    let mut spoke_angles: Vec<f32> = vec![angle_segment];
+    let mut shade_angles: Vec<f32> = vec![];
     for i in 0..segments {
-        angles.push(angle_segment * f32::from(i));
+        spoke_angles.push(angle_segment * f32::from(i));
+        if i < segments_filled {
+            // default angle of a shade object is 90deg. Need to use that as an offset.
+            shade_angles.push(angle_segment * f32::from(i) - 90f32);
+        }
     }
 
     let mut render_data = HashMap::new();
-    render_data.insert("angle", RenderDataTypes::FloatList(angles));
-    render_data.insert("height", RenderDataTypes::Int(100));
-    render_data.insert("width", RenderDataTypes::Int(100));
+    let radius = 90f32;
+    let width = 200;
+    let height = 200;
+    render_data.insert("spoke_angle", RenderDataTypes::FloatList(spoke_angles));
+    render_data.insert("shade_angle", RenderDataTypes::FloatList(shade_angles));
+    render_data.insert("height", RenderDataTypes::Int(height));
+    render_data.insert("width", RenderDataTypes::Int(width));
+    render_data.insert("cx", RenderDataTypes::Int(width / 2));
+    render_data.insert("cy", RenderDataTypes::Int(height / 2));
+    render_data.insert("radius", RenderDataTypes::Float(radius));
+    render_data.insert(
+        "rcostheta",
+        RenderDataTypes::Float(radius * (angle_segment * PI / 180f32).cos()),
+    );
+    render_data.insert(
+        "rsintheta",
+        RenderDataTypes::Float(radius * (angle_segment * PI / 180f32).sin()),
+    );
 
     let svg_source = handlebars
         .render("progress_clock", &render_data)
         .map_err(|e| e.to_string())?;
 
-    println!("{}", svg_source);
+    dbg!("{}", &svg_source);
 
     let mut pixmap = Pixmap::new(200, 200).expect("Could not get mutable pixmap.");
     render(
@@ -54,5 +86,5 @@ pub fn render_progress_clock(segments: u8) -> Result<(), String> {
         &mut pixmap.as_mut(),
     );
 
-    pixmap.save_png("./out.png").map_err(|e| e.to_string())
+    pixmap.encode_png().map_err(|err| err.into())
 }

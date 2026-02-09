@@ -1,6 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="{{width}}" height="{{height}}" fill="none">
-  <circle cx="100" cy="100" r="90" stroke="white" stroke-width="3" fill="transparent"/>
-  {{#each angle}}
-  <line x1="100" y1="100" x2="100" y2="10" transform="rotate({{this}} 100 100)" stroke="white" stroke-width="2"/>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  width="{{width}}"
+  height="{{height}}"
+>
+  <defs>
+  <!-- Spoke Definition -->
+    <path
+      id="spoke"
+      d="M {{cx}} {{cy}} l 0 -{{radius}}"
+      stroke="white"
+      stroke-width="10"
+    />
+
+  <!-- Shade Definition -->
+    <path 
+      id="shade"
+      d="
+        M 0 0
+        L {{radius}} 0
+        A {{radius}} {{radius}} 0 0 1 {{rcostheta}} {{rsintheta}}
+        L 0 0
+      "
+      fill="red"
+      fill-opacity="0.4"
+    />
+  </defs>
+
+  <!-- Shaded Regions -->
+  {{#each shade_angle}}
+  <use
+    xlink:href="#shade"
+    transform="translate({{@root.cx}} {{@root.cy}}) rotate({{this}})" />
+  {{/each}}
+
+  <!-- Base Circle -->
+  <circle cx="{{cx}}" cy="{{cy}}" r="{{radius}}" stroke="white" stroke-width="10" fill="transparent"/>
+
+  <!-- Spokes -->
+  {{#each spoke_angle}}
+  <use xlink:href="#spoke" transform="rotate({{this}} {{@root.cx}} {{@root.cy}})"/>
   {{/each}}
 </svg>
