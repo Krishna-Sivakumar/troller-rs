@@ -120,7 +120,7 @@ async fn display_clock_name_autocomplete<'a>(
     let db = ctx.data().db.lock().await;
     let items = ctx
         .guild()
-        .map(|namespace| db.get_available_clocks(namespace.name.clone(), partial))
+        .map(|namespace| db.get_available_clocks(&namespace.name, partial))
         .map(|progress_clocks_result| progress_clocks_result.unwrap_or(vec![]))
         .map(|progress_clocks| {
             progress_clocks
@@ -144,18 +144,14 @@ async fn display_clock(
     let items = ctx
         .guild()
         .map_or_else(
-            || db.get_available_clocks(ctx.author().name.clone(), ""),
-            |guild| db.get_available_clocks(guild.name.clone(), ""),
+            || db.get_available_clocks(&ctx.author().name, ""),
+            |guild| db.get_available_clocks(&guild.name, ""),
         )
         .unwrap_or_default();
 
     match items.iter().find(|item| (**item).name.cmp(&name).is_eq()) {
         Some(progress_clock) => {
-            // TODO add colouring support
-            let attachment = match render_progress_clock(
-                progress_clock.segments,
-                progress_clock.segments_filled,
-            ) {
+            let attachment = match render_progress_clock(progress_clock) {
                 Ok(png_data) => vec![CreateAttachment::bytes(png_data, "clock.png")],
                 Err(_) => {
                     vec![]
@@ -216,8 +212,16 @@ fn cli() {
                         .expect(HELP_STRING)
                         .parse()
                         .expect("HELP_STRING");
-                    render_progress_clock(segments, segments_filled)
-                        .expect("Could not render progress clock.");
+                    render_progress_clock(&ProgressClock {
+                        namespace: "".to_owned(),
+                        name: "".to_owned(),
+                        segments,
+                        segments_filled,
+                        creation_date: 0,
+                        ephemeral: false,
+                        color: None,
+                    })
+                    .expect("Could not render progress clock.");
                     println!("wrote progress clock to out.png.");
                 }
                 _ => {

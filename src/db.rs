@@ -1,11 +1,11 @@
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
 /// helps retrieve SQL schemas & other stuff for structs implementing this trait.
 pub trait ORM {
     fn schema() -> &'static str;
-    fn table_name() -> &'static str;
 }
 
 /// an SQLite db handle with the following schema:
@@ -14,6 +14,7 @@ pub struct DB {
     connection: Connection,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ProgressClock {
     pub namespace: String,
     pub name: String,
@@ -27,21 +28,15 @@ pub struct ProgressClock {
 impl ORM for ProgressClock {
     fn schema() -> &'static str {
         return "
-        CREATE TABLE IF NOT EXISTS progress_clock(namespace TEXT, name TEXT, segments INTEGER, segments_filled INTEGER, creation_time DATETIME, ephemeral BOOL, color TEXT);
+        CREATE TABLE IF NOT EXISTS progress_clock(namespace TEXT, name TEXT, segments INTEGER, segments_filled INTEGER, creation_time DATETIME DEFAULT CURRENT_TIMESTAMP, ephemeral BOOL, color TEXT);
         CREATE INDEX IF NOT EXISTS progress_clock_ns ON progress_clock(namespace);
         CREATE INDEX IF NOT EXISTS progress_clock_name ON progress_clock(name);
         ";
-    }
-
-    fn table_name() -> &'static str {
-        return "progress_clock";
     }
 }
 
 impl DB {
     pub fn new() -> Result<Self, Error> {
-        const CREATE_QUERY: &str = "";
-
         let connection = Connection::open("./troller.sqlite")?;
         connection.execute_batch(ProgressClock::schema())?;
 
@@ -53,10 +48,19 @@ impl DB {
     /// Given a namespace (user or guild), returns all available clocks.
     pub fn get_available_clocks<'a>(
         &self,
-        namespace: String,
+        namespace: &'a String,
         partial: &'a str,
     ) -> Result<Vec<ProgressClock>, Error> {
-        let mut statement = self.connection.prepare("SELECT name, segments, segments_filled, creation_time, ephemeral, color FROM progress_clock WHERE namespace = ?1 AND name LIKE %?2%")?;
+        let mut statement = self.connection.prepare(
+            "
+            SELECT name, segments, segments_filled, creation_time, ephemeral, color
+            FROM progress_clock
+            WHERE
+            namespace = ?1
+            AND name LIKE %?2%
+            AND ((ephemeral = 1 and julianday('now') - julianday(creation_time) = 0) OR (ephemeral = 0));
+        ",
+        )?;
         let mut clocks: Vec<ProgressClock> = Vec::new();
         let clock_iter = statement.query_map(rusqlite::params![namespace, partial], |row| {
             Ok(ProgressClock {
@@ -77,8 +81,22 @@ impl DB {
         Ok(clocks)
     }
 
-    /// Given a namespace (user or guild) and clock name, returns the status of a progress clock.
-    pub fn get_clock(&self, name: String, namespace: String) -> Result<(u8, u8), Error> {
-        todo!();
+    pub fn save_clock(&self, progress_clock: ProgressClock) -> Result<usize, Error> {
+        let mut statement = self.connection.prepare(
+            "INSERT OR UPDATE INTO progress_clock
+            (namespace, name, segments, segments_filled, ephemeral, color)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+        )?;
+
+        statement
+            .execute(rusqlite::params![
+                &progress_clock.namespace,
+                &progress_clock.name,
+                &progress_clock.segments,
+                &progress_clock.segments_filled,
+                &progress_clock.ephemeral,
+                &progress_clock.color.unwrap_or(String::from("green"))
+            ])
+            .map_err(|e| e.into())
     }
 }

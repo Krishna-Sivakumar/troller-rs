@@ -22,7 +22,7 @@
         A {{radius}} {{radius}} 0 0 1 {{rcostheta}} {{rsintheta}}
         L 0 0
       "
-      fill="red"
+      fill="{{shade_color}}"
       fill-opacity="0.4"
     />
   </defs>

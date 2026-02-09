@@ -4,6 +4,8 @@ use resvg::{render, tiny_skia::Pixmap, usvg::Tree};
 use std::collections::HashMap;
 use std::f32::consts::PI;
 
+use crate::db::ProgressClock;
+
 static SVG_FILE: &str = include_str!("./source.svg");
 
 #[derive(Debug)]
@@ -11,6 +13,7 @@ enum RenderDataTypes {
     Int(i32),
     Float(f32),
     FloatList(Vec<f32>),
+    String(String),
 }
 
 impl serde::Serialize for RenderDataTypes {
@@ -22,16 +25,14 @@ impl serde::Serialize for RenderDataTypes {
             Self::FloatList(floats) => floats.serialize(serializer),
             Self::Int(int) => int.serialize(serializer),
             Self::Float(float) => float.serialize(serializer),
+            Self::String(string) => string.serialize(serializer),
         }
     }
 }
 
-pub fn render_progress_clock(
-    segments: u8,
-    segments_filled: u8,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+pub fn render_progress_clock(clock: &ProgressClock) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     dbg!("{segments} {segments_filled}");
-    if segments_filled > segments {
+    if clock.segments_filled > clock.segments {
         return Err(String::from("segments filled must be lesser than existing segments.").into());
     }
 
@@ -41,12 +42,12 @@ pub fn render_progress_clock(
         .register_template_string("progress_clock", SVG_FILE)
         .map_err(|e| e.to_string())?;
 
-    let angle_segment: f32 = 360f32 / f32::from(segments);
+    let angle_segment: f32 = 360f32 / f32::from(clock.segments);
     let mut spoke_angles: Vec<f32> = vec![angle_segment];
     let mut shade_angles: Vec<f32> = vec![];
-    for i in 0..segments {
+    for i in 0..clock.segments {
         spoke_angles.push(angle_segment * f32::from(i));
-        if i < segments_filled {
+        if i < clock.segments_filled {
             // default angle of a shade object is 90deg. Need to use that as an offset.
             shade_angles.push(angle_segment * f32::from(i) - 90f32);
         }
@@ -58,6 +59,10 @@ pub fn render_progress_clock(
     let height = 200;
     render_data.insert("spoke_angle", RenderDataTypes::FloatList(spoke_angles));
     render_data.insert("shade_angle", RenderDataTypes::FloatList(shade_angles));
+    render_data.insert(
+        "shade_color",
+        RenderDataTypes::String(clock.color.clone().unwrap_or(String::from("green"))),
+    );
     render_data.insert("height", RenderDataTypes::Int(height));
     render_data.insert("width", RenderDataTypes::Int(width));
     render_data.insert("cx", RenderDataTypes::Int(width / 2));
