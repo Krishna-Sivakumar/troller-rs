@@ -30,8 +30,9 @@ impl serde::Serialize for RenderDataTypes {
     }
 }
 
-pub fn render_progress_clock(clock: &ProgressClock) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    dbg!("{segments} {segments_filled}");
+pub fn render_progress_clock(
+    clock: &ProgressClock,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     if clock.segments_filled > clock.segments {
         return Err(String::from("segments filled must be lesser than existing segments.").into());
     }
