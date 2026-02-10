@@ -6,11 +6,21 @@ Currently Troller does two things:
 1. Creates and manages Progress Clocks (Blades in the Dark style)
 2. Rolls dice
 
-Both of these features are available as the following commands:
+## Installation (Linux)
 
-## Dice Rolling
+1. Install Rust & Cargo from here: https://rust-lang.org/tools/install/
+2. Follow these instructions:
+```shell
+cd troller-rs
+cargo build -r
+DISCORD_TOKEN='YOUR_TOKEN_HERE' ./target/release/troller-rs
+```
 
-### `/roll`
+## Command Reference
+
+### Dice Rolling
+
+#### `/roll`
 Roll dice using standard dice notation.
 
 **Options:**
@@ -29,9 +39,9 @@ Roll dice using standard dice notation.
 
 ---
 
-## Progress Clock Management
+### Progress Clock Management
 
-### `/add_progress_clock`
+#### `/add_progress_clock`
 Create a new progress clock to track goals or countdowns.
 
 **Options:**
@@ -48,7 +58,7 @@ Create a new progress clock to track goals or countdowns.
 
 ---
 
-### `/bump_progress_clock`
+#### `/bump_progress_clock`
 Advance a progress clock by filling in more segments.
 
 **Options:**
@@ -61,7 +71,7 @@ Advance a progress clock by filling in more segments.
 
 ---
 
-### `/display_clock`
+#### `/display_clock`
 Show an existing progress clock.
 
 **Options:**
@@ -72,7 +82,7 @@ Show an existing progress clock.
 
 ---
 
-### `/remove_progress_clock`
+#### `/remove_progress_clock`
 Delete a progress clock.
 
 **Options:**
@@ -83,7 +93,7 @@ Delete a progress clock.
 
 ---
 
-## Notes
+### Notes
 
 1. Permissions are managed through the Server Integrations panel.
 2. Progress clocks are namespaced by server (guild) or by user in direct messages
