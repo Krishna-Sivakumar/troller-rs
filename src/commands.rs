@@ -51,10 +51,6 @@ pub async fn roll(
         .title("Roll Error")
         .field("", "The entered dice text was not valid. Take a look at the /help command for a guide on how to use the bot!", false)
     };
-    println!(
-        "Took {}ms to handle dice command",
-        now.elapsed().as_millis()
-    );
     ctx.send(poise::CreateReply {
         embeds: vec![response],
         ephemeral: keep_private,
@@ -254,10 +250,7 @@ pub async fn display_clock_name_autocomplete<'a>(
         .guild()
         .map_or_else(
             || db.get_available_clocks(&ctx.author().name, partial),
-            |namespace| {
-                println!("{}", &namespace.name);
-                db.get_available_clocks(&namespace.name, partial)
-            },
+            |namespace| db.get_available_clocks(&namespace.name, partial),
         )
         .map(|progress_clocks| {
             progress_clocks
