@@ -1,3 +1,5 @@
+use std::{ffi::OsString, fs, path::PathBuf, str::pattern::Pattern};
+
 use crate::{
     db::{DB, ProgressClock},
     dice::handle_dice_string,
@@ -9,6 +11,7 @@ use poise::serenity_prelude::{CreateAttachment, CreateEmbed};
 
 pub struct Data {
     pub db: Mutex<DB>,
+    pub music_dir: PathBuf,
 }
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -315,5 +318,48 @@ pub async fn display_clock(
         }
     };
 
+    Ok(())
+}
+
+pub async fn music_file_autocomplete<'a>(
+    ctx: Context<'_>,
+    partial: &'a str,
+) -> impl Stream<Item = String> + 'a {
+    let completions: std::io::Result<Vec<String>> = ctx
+        .data()
+        .music_dir
+        .read_dir()
+        .map(|entries| {
+            entries.map(|entry| match entry {
+                Ok(entry) => entry
+                    .path()
+                    .strip_prefix(&ctx.data().music_dir)
+                    .expect("Could not strip prefix.")
+                    .to_str()
+                    .expect("Couldn't convert non-utf8 path to string.")
+                    .to_owned(),
+                Err(_) => String::new(),
+            })
+        })
+        .map(|paths| {
+            paths
+                .filter(|path| path.len() > 0 && path.starts_with(partial))
+                .collect()
+        });
+    futures::stream::iter(completions.unwrap_or(vec![]))
+}
+
+#[poise::command(slash_command)]
+pub async fn play_music_file(
+    ctx: Context<'_>,
+    #[description = "pick file"]
+    #[autocomplete = "music_file_autocomplete"]
+    filename: String,
+) -> Result<(), Error> {
+    Ok(())
+}
+
+#[poise::command(slash_command, subcommand_required, subcommands("play_music_file"))]
+pub async fn play_music(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }

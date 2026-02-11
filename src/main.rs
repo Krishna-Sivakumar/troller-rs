@@ -10,6 +10,7 @@ use futures::lock::Mutex;
 use poise::serenity_prelude::futures::{self};
 use poise::serenity_prelude::{self as serenity};
 use std::env::args;
+use std::ffi::OsString;
 
 #[allow(unused)]
 fn cli() {
@@ -77,13 +78,25 @@ async fn main() {
                 display_clock(),
                 remove_progress_clock(),
                 bump_progress_clock(),
+                play_music(),
             ],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
+            let music_dir = std::env::var_os("MUSIC_DIR")
+                .expect("no MUSIC_DIR variable set in the environment.")
+                .to_owned();
+            let music_dir = std::path::PathBuf::from(music_dir);
+            music_dir
+                .try_exists()
+                .expect("MUSIC_DIR environment variable does not point to a valid path.");
+
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(Data { db: database })
+                Ok(Data {
+                    db: database,
+                    music_dir,
+                })
             })
         })
         .build();
