@@ -1,11 +1,24 @@
+pub mod compile;
 pub mod display;
 pub mod eval;
 pub mod parser;
 
+use parser::{NamedList, TakeAdd};
 use std::{ops::Range, time::Instant};
 
-use eval::{Compile, Eval};
-use parser::{NamedList, TakeAdd};
+use crate::dice::eval::RollHand;
+
+/// This trait is implemented by structs that compile to a Roll AST.
+pub trait Compile {
+    /// Returns a compiled Roll AST node.
+    fn compile(&self) -> RollHand;
+}
+
+/// This trait is implemented by trees that can return a summed up roll.
+pub trait Eval {
+    /// Returns the summed roll of a node.
+    fn eval(&self) -> u32;
+}
 
 pub struct RollResult {
     pub name: String,
@@ -15,7 +28,7 @@ pub struct RollResult {
 pub fn handle_dice_string(
     dice_string: String,
 ) -> Result<Vec<RollResult>, Box<dyn std::error::Error>> {
-    let (remaining, list) =
+    let (_remaining, list) =
         NamedList::parse(dice_string.as_ref()).map_err(|err| err.to_string())?;
 
     let mut out = String::new();

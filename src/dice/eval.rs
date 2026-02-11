@@ -1,18 +1,5 @@
-use crate::dice::parser::*;
-use rand::distr::{Distribution, Uniform};
+use crate::dice::{Eval, parser::*};
 use std::rc::Rc;
-
-/// This trait is implemented by structs that compile to a Roll AST.
-pub trait Compile {
-    /// Returns a compiled Roll AST node.
-    fn compile(&self) -> RollHand;
-}
-
-/// This trait is implemented by trees that can return a summed up roll.
-pub trait Eval {
-    /// Returns the summed roll of a node.
-    fn eval(&self) -> u32;
-}
 
 pub enum Op {
     Plus,
@@ -55,6 +42,14 @@ pub struct Roll {
     pub limit: Option<u32>,
     /// size of die rolled
     pub die: Option<u32>,
+}
+
+/// represents a combination of roll nodes with a binary operator.
+pub struct RollNode {
+    /// left hand of node.
+    pub left: Rc<RollHand>,
+    /// right hand of node, if any.
+    pub right: Option<(Op, Rc<RollHand>)>,
 }
 
 impl Eval for Roll {
@@ -107,100 +102,6 @@ impl Eval for RollHand {
         match self {
             RollHand::Roll(roll) => roll.eval(),
             RollHand::RollNode(roll_node) => roll_node.eval(),
-        }
-    }
-}
-
-/// represents a combination of roll nodes with a binary operator.
-pub struct RollNode {
-    /// left hand of node.
-    pub left: Rc<RollHand>,
-    /// right hand of node, if any.
-    pub right: Option<(Op, Rc<RollHand>)>,
-}
-
-impl Compile for &Dice {
-    fn compile(&self) -> RollHand {
-        RollHand::Roll(match self.die {
-            None => Roll {
-                rolls: vec![self.count],
-                limit: None,
-                die: None,
-            },
-            Some(die) => {
-                let mut rolls = Vec::new();
-                let mut rng = rand::rng();
-                let between =
-                    Uniform::try_from(1..die + 1).expect("Could not create random distribution.");
-                for _ in 0..self.count {
-                    rolls.push(between.sample(&mut rng));
-                }
-                Roll {
-                    rolls,
-                    limit: None,
-                    die: Some(die),
-                }
-            }
-        })
-    }
-}
-
-impl Compile for &Take {
-    fn compile(&self) -> RollHand {
-        match self.dice.as_ref().compile() {
-            RollHand::Roll(mut roll) => match self.filter {
-                Some((count, take_higher)) => {
-                    roll.rolls.sort_by(|a, b| {
-                        if take_higher {
-                            a.cmp(b).reverse()
-                        } else {
-                            a.cmp(b)
-                        }
-                    });
-                    roll.limit = Some(count);
-                    RollHand::Roll(roll)
-                }
-                None => RollHand::Roll(roll),
-            },
-            RollHand::RollNode(_node) => unreachable!(),
-        }
-    }
-}
-
-impl Compile for &TakeFactor {
-    fn compile(&self) -> RollHand {
-        let left = self.left.as_ref().compile();
-        match self.right.as_ref() {
-            Some((op, take_factor)) => match take_factor.as_ref() {
-                TakeFactorRight::TakeFactor(take_factor) => RollHand::RollNode(RollNode {
-                    left: Rc::new(left),
-                    right: Some((op.into(), Rc::new(take_factor.compile()))),
-                }),
-                TakeFactorRight::Take(take) => RollHand::RollNode(RollNode {
-                    left: Rc::new(left),
-                    right: Some((op.into(), Rc::new(take.compile()))),
-                }),
-            },
-            None => left,
-        }
-    }
-}
-
-impl Compile for &TakeAdd {
-    fn compile(&self) -> RollHand {
-        let left = self.left.as_ref().compile();
-        match self.right.as_ref() {
-            Some((op, take_add)) => match take_add.as_ref() {
-                TakeAddRight::TakeFactor(take_factor) => RollHand::RollNode(RollNode {
-                    left: Rc::new(left),
-                    right: Some((op.into(), Rc::new(take_factor.compile()))),
-                }),
-                TakeAddRight::TakeAdd(take_add) => RollHand::RollNode(RollNode {
-                    left: Rc::new(left),
-                    right: Some((op.into(), Rc::new(take_add.compile()))),
-                }),
-            },
-            None => left,
         }
     }
 }

@@ -14,6 +14,15 @@ impl Display for OpAdd {
     }
 }
 
+impl std::fmt::Display for OpFactor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Multiply => f.write_str("*"),
+            Self::Divide => f.write_str("/"),
+        }
+    }
+}
+
 impl Display for Dice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.die {
@@ -25,12 +34,15 @@ impl Display for Dice {
 
 impl Display for Take {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.filter {
+        match &self.filter {
             None => f.write_fmt(format_args!("{}", self.dice)),
             Some((count, take_higher)) => f.write_fmt(format_args!(
                 "{}{}{}",
                 self.dice,
-                if take_higher { "h" } else { "l" },
+                match take_higher {
+                    FilterType::Higher => "h",
+                    FilterType::Lower => "l",
+                },
                 count
             )),
         }

@@ -14,6 +14,55 @@ pub enum OpAdd {
     Minus,
 }
 
+pub enum OpFactor {
+    Multiply,
+    Divide,
+}
+
+pub struct Dice {
+    pub count: u32,
+    pub die: Option<u32>,
+}
+
+pub enum FilterType {
+    Higher,
+    Lower,
+}
+
+pub struct Take {
+    pub dice: Rc<Dice>,
+    pub filter: Option<(u32, FilterType)>,
+}
+
+pub enum TakeFactorRight {
+    TakeFactor(TakeFactor),
+    Take(Take),
+}
+
+pub struct TakeFactor {
+    pub left: Rc<Take>,
+    pub right: Option<(OpFactor, Rc<TakeFactorRight>)>,
+}
+
+pub enum TakeAddRight {
+    TakeFactor(TakeFactor),
+    TakeAdd(TakeAdd),
+}
+
+pub struct TakeAdd {
+    pub left: Rc<TakeFactor>,
+    pub right: Option<(OpAdd, Rc<TakeAddRight>)>,
+}
+
+pub struct NamedTakeAdd {
+    pub name: Option<String>,
+    pub expression: Rc<TakeAdd>,
+}
+
+pub struct NamedList {
+    pub expressions: Vec<NamedTakeAdd>,
+}
+
 impl OpAdd {
     fn parse(input: &str) -> IResult<&str, Self> {
         let (input, char) = alt((char('+'), char('-'))).parse(input)?;
@@ -21,20 +70,6 @@ impl OpAdd {
             Ok((input, OpAdd::Plus))
         } else {
             Ok((input, OpAdd::Minus))
-        }
-    }
-}
-
-pub enum OpFactor {
-    Multiply,
-    Divide,
-}
-
-impl std::fmt::Display for OpFactor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Multiply => f.write_str("*"),
-            Self::Divide => f.write_str("/"),
         }
     }
 }
@@ -48,11 +83,6 @@ impl OpFactor {
             Ok((input, OpFactor::Divide))
         }
     }
-}
-
-pub struct Dice {
-    pub count: u32,
-    pub die: Option<u32>,
 }
 
 impl Dice {
@@ -72,11 +102,6 @@ impl Dice {
     }
 }
 
-pub struct Take {
-    pub dice: Rc<Dice>,
-    pub filter: Option<(u32, bool)>,
-}
-
 impl Take {
     pub fn parse(input: &str) -> IResult<&str, Self> {
         let (input, dice) = Dice::parse(input)?;
@@ -87,114 +112,70 @@ impl Take {
         ))
         .parse(input)?;
 
-        let take_object = match optional_filter {
-            None => Take {
+        Ok((
+            input,
+            Take {
                 dice: Rc::new(dice),
-                filter: None,
+                filter: optional_filter.map(|(filter_type_char, count)| {
+                    (
+                        count,
+                        match filter_type_char {
+                            'h' | 'H' => FilterType::Higher,
+                            _ => FilterType::Lower,
+                        },
+                    )
+                }),
             },
-            Some((higher_or_lower_char, count)) => {
-                let take_higher = higher_or_lower_char.to_ascii_lowercase() == 'h';
-                Take {
-                    dice: Rc::new(dice),
-                    filter: Some((count, take_higher)),
-                }
-            }
-        };
-
-        Ok((input, take_object))
+        ))
     }
-}
-
-pub enum TakeFactorRight {
-    TakeFactor(TakeFactor),
-    Take(Take),
-}
-
-pub struct TakeFactor {
-    pub left: Rc<Take>,
-    pub right: Option<(OpFactor, Rc<TakeFactorRight>)>,
 }
 
 impl TakeFactor {
     pub fn parse(input: &str) -> IResult<&str, Self> {
-        fn parse_take_or_take_factor(input: &str) -> IResult<&str, TakeFactorRight> {
-            let maybe_take_factor = TakeFactor::parse(input);
-            match maybe_take_factor {
-                Ok((input, take_factor)) => Ok((input, TakeFactorRight::TakeFactor(take_factor))),
-                Err(_) => {
-                    Take::parse(input).map(|(input, take)| (input, TakeFactorRight::Take(take)))
-                }
-            }
-        }
-
         let (input, left_expr) = Take::parse(input)?;
-        let (input, right_option) =
-            opt((space0, OpFactor::parse, space0, parse_take_or_take_factor)).parse(input)?;
-        match right_option {
-            Some((_, op, _, right_expr)) => Ok((
-                input,
-                TakeFactor {
-                    left: Rc::new(left_expr),
-                    right: Some((op, Rc::new(right_expr))),
-                },
+        let (input, right_option) = opt((
+            space0,
+            OpFactor::parse,
+            space0,
+            alt((
+                TakeFactor::parse.map(|tf| TakeFactorRight::TakeFactor(tf)),
+                Take::parse.map(|take| TakeFactorRight::Take(take)),
             )),
-            None => Ok((
-                input,
-                TakeFactor {
-                    left: Rc::new(left_expr),
-                    right: None,
-                },
-            )),
-        }
+        ))
+        .parse(input)?;
+
+        Ok((
+            input,
+            TakeFactor {
+                left: Rc::new(left_expr),
+                right: right_option.map(|(_, op, _, node)| (op, Rc::new(node))),
+            },
+        ))
     }
-}
-
-pub enum TakeAddRight {
-    TakeFactor(TakeFactor),
-    TakeAdd(TakeAdd),
-}
-
-pub struct TakeAdd {
-    pub left: Rc<TakeFactor>,
-    pub right: Option<(OpAdd, Rc<TakeAddRight>)>,
 }
 
 impl TakeAdd {
     pub fn parse(input: &str) -> IResult<&str, Self> {
-        fn parse_take_factor_or_take_add(input: &str) -> IResult<&str, TakeAddRight> {
-            let maybe_take_add = TakeAdd::parse(input);
-            match maybe_take_add {
-                Ok((input, take_add)) => Ok((input, TakeAddRight::TakeAdd(take_add))),
-                Err(_) => TakeFactor::parse(input)
-                    .map(|(input, take_factor)| (input, TakeAddRight::TakeFactor(take_factor))),
-            }
-        }
-
         let (input, left_expr) = TakeFactor::parse(input)?;
-        let (input, right_option) =
-            opt((space0, OpAdd::parse, space0, parse_take_factor_or_take_add)).parse(input)?;
-        match right_option {
-            Some((_, op, _, right_expr)) => Ok((
-                input,
-                TakeAdd {
-                    left: Rc::new(left_expr),
-                    right: Some((op, Rc::new(right_expr))),
-                },
+        let (input, right_option) = opt((
+            space0,
+            OpAdd::parse,
+            space0,
+            alt((
+                TakeAdd::parse.map(|take_add| TakeAddRight::TakeAdd(take_add)),
+                TakeFactor::parse.map(|take_factor| TakeAddRight::TakeFactor(take_factor)),
             )),
-            None => Ok((
-                input,
-                TakeAdd {
-                    left: Rc::new(left_expr),
-                    right: None,
-                },
-            )),
-        }
-    }
-}
+        ))
+        .parse(input)?;
 
-pub struct NamedTakeAdd {
-    pub name: Option<String>,
-    pub expression: Rc<TakeAdd>,
+        Ok((
+            input,
+            TakeAdd {
+                left: Rc::new(left_expr),
+                right: right_option.map(|(_, op, _, node)| (op, Rc::new(node))),
+            },
+        ))
+    }
 }
 
 impl NamedTakeAdd {
@@ -216,10 +197,6 @@ impl NamedTakeAdd {
             },
         ))
     }
-}
-
-pub struct NamedList {
-    pub expressions: Vec<NamedTakeAdd>,
 }
 
 impl NamedList {
