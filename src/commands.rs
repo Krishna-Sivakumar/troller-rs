@@ -6,7 +6,6 @@ use crate::{
 use futures::lock::Mutex;
 use poise::serenity_prelude::futures::{self, Stream};
 use poise::serenity_prelude::{CreateAttachment, CreateEmbed};
-use std::time::Instant;
 
 pub struct Data {
     pub db: Mutex<DB>,
@@ -36,7 +35,6 @@ pub async fn roll(
     #[description = "Dice string to roll."] dice_string: String,
     #[description = "Keep roll private?"] keep_private: Option<bool>,
 ) -> Result<(), Error> {
-    let now = Instant::now();
     let response = match handle_dice_string(dice_string) {
         Ok(valid_response) => CreateEmbed::new()
             .color(*EMBED_OK_TUPLE)

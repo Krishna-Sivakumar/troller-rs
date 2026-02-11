@@ -49,6 +49,15 @@ impl Display for Take {
     }
 }
 
+impl Display for TakeRecursive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TakeRecursive::Take(take) => take.fmt(f),
+            TakeRecursive::TakeAdd(take_add) => f.write_fmt(format_args!("({take_add})")),
+        }
+    }
+}
+
 impl Display for TakeFactorRight {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

@@ -9,56 +9,73 @@ use nom::{
 
 use std::rc::Rc;
 
+#[derive(Debug)]
 pub enum OpAdd {
     Plus,
     Minus,
 }
 
+#[derive(Debug)]
 pub enum OpFactor {
     Multiply,
     Divide,
 }
 
+#[derive(Debug)]
 pub struct Dice {
     pub count: u32,
     pub die: Option<u32>,
 }
 
+#[derive(Debug)]
 pub enum FilterType {
     Higher,
     Lower,
 }
 
+#[derive(Debug)]
 pub struct Take {
     pub dice: Rc<Dice>,
     pub filter: Option<(u32, FilterType)>,
 }
 
-pub enum TakeFactorRight {
-    TakeFactor(TakeFactor),
+#[derive(Debug)]
+pub enum TakeRecursive {
     Take(Take),
+    TakeAdd(TakeAdd),
 }
 
+#[derive(Debug)]
+pub enum TakeFactorRight {
+    TakeFactor(TakeFactor),
+    Take(TakeRecursive),
+}
+
+#[derive(Debug)]
 pub struct TakeFactor {
-    pub left: Rc<Take>,
+    pub left: Rc<TakeRecursive>,
     pub right: Option<(OpFactor, Rc<TakeFactorRight>)>,
 }
 
+#[derive(Debug)]
 pub enum TakeAddRight {
     TakeFactor(TakeFactor),
     TakeAdd(TakeAdd),
 }
 
+#[derive(Debug)]
 pub struct TakeAdd {
     pub left: Rc<TakeFactor>,
     pub right: Option<(OpAdd, Rc<TakeAddRight>)>,
 }
 
+#[derive(Debug)]
 pub struct NamedTakeAdd {
     pub name: Option<String>,
     pub expression: Rc<TakeAdd>,
 }
 
+#[derive(Debug)]
 pub struct NamedList {
     pub expressions: Vec<NamedTakeAdd>,
 }
@@ -130,16 +147,27 @@ impl Take {
     }
 }
 
+impl TakeRecursive {
+    pub fn parse(input: &str) -> IResult<&str, Self> {
+        alt((
+            (space0, char('('), space0, TakeAdd::parse, space0, char(')'))
+                .map(|(_, _, _, take_add, _, _)| TakeRecursive::TakeAdd(take_add)),
+            Take::parse.map(|take| TakeRecursive::Take(take)),
+        ))
+        .parse(input)
+    }
+}
+
 impl TakeFactor {
     pub fn parse(input: &str) -> IResult<&str, Self> {
-        let (input, left_expr) = Take::parse(input)?;
+        let (input, left_expr) = TakeRecursive::parse(input)?;
         let (input, right_option) = opt((
             space0,
             OpFactor::parse,
             space0,
             alt((
-                TakeFactor::parse.map(|tf| TakeFactorRight::TakeFactor(tf)),
-                Take::parse.map(|take| TakeFactorRight::Take(take)),
+                TakeRecursive::parse.map(|take_recursive| TakeFactorRight::Take(take_recursive)),
+                TakeFactor::parse.map(|take_factor| TakeFactorRight::TakeFactor(take_factor)),
             )),
         ))
         .parse(input)?;

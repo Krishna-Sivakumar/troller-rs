@@ -59,6 +59,7 @@ pub fn handle_dice_string(
     Ok(roll_results)
 }
 
+#[allow(dead_code)]
 fn test_roll_performance(
     unnamed_expression: &'static str,
     range: Range<i32>,

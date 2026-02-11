@@ -51,6 +51,15 @@ impl Compile for &Take {
     }
 }
 
+impl Compile for &TakeRecursive {
+    fn compile(&self) -> RollHand {
+        match self {
+            TakeRecursive::Take(take) => take.compile(),
+            TakeRecursive::TakeAdd(take_add) => take_add.compile(),
+        }
+    }
+}
+
 impl Compile for &TakeFactor {
     fn compile(&self) -> RollHand {
         let left = self.left.as_ref().compile();
