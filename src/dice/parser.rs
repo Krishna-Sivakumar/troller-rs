@@ -1,3 +1,15 @@
+//! Grammar Reference
+//!
+//! NamedList := NamedTakeAdd (,NamedTakeAdd)*
+//! NamedTakeAdd := (Name ':')? _ TakeAdd
+//! Name := [A-Za-z_]+
+//! TakeAdd := TakeFactor (_ [* | /] _ TakeAdd | TakeFactor)
+//! TakeFactor := TakeRecursive (_ [+ | -] _ TakeFactor | TakeRecursive)
+//! TakeRecursive := Take | _ '(' _ TakeAdd _ ')'
+//! Take := Dice ([hHlL]\d+)?
+//! Dice := [\d+] 'd' [\d+]
+//! _ := [ \n\r]*
+
 use nom::{
     IResult, Parser,
     branch::alt,
@@ -7,6 +19,7 @@ use nom::{
     multi::many0,
 };
 
+use crate::dice::Parse;
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -80,7 +93,7 @@ pub struct NamedList {
     pub expressions: Vec<NamedTakeAdd>,
 }
 
-impl OpAdd {
+impl Parse for OpAdd {
     fn parse(input: &str) -> IResult<&str, Self> {
         let (input, char) = alt((char('+'), char('-'))).parse(input)?;
         if char == '+' {
@@ -91,7 +104,7 @@ impl OpAdd {
     }
 }
 
-impl OpFactor {
+impl Parse for OpFactor {
     fn parse(input: &str) -> IResult<&str, Self> {
         let (input, char) = alt((char('*'), char('/'))).parse(input)?;
         if char == '*' {
@@ -102,8 +115,8 @@ impl OpFactor {
     }
 }
 
-impl Dice {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+impl Parse for Dice {
+    fn parse(input: &str) -> IResult<&str, Self> {
         let (input, count): (&str, u32) = map_res(digit1, str::parse).parse(input)?;
 
         let (input, optional_die): (&str, Option<(char, u32)>) =
@@ -119,8 +132,8 @@ impl Dice {
     }
 }
 
-impl Take {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+impl Parse for Take {
+    fn parse(input: &str) -> IResult<&str, Self> {
         let (input, dice) = Dice::parse(input)?;
 
         let (input, optional_filter): (&str, Option<(char, u32)>) = opt((
@@ -147,8 +160,8 @@ impl Take {
     }
 }
 
-impl TakeRecursive {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+impl Parse for TakeRecursive {
+    fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             (space0, char('('), space0, TakeAdd::parse, space0, char(')'))
                 .map(|(_, _, _, take_add, _, _)| TakeRecursive::TakeAdd(take_add)),
@@ -158,8 +171,8 @@ impl TakeRecursive {
     }
 }
 
-impl TakeFactor {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+impl Parse for TakeFactor {
+    fn parse(input: &str) -> IResult<&str, Self> {
         let (input, left_expr) = TakeRecursive::parse(input)?;
         let (input, right_option) = opt((
             space0,
@@ -182,8 +195,8 @@ impl TakeFactor {
     }
 }
 
-impl TakeAdd {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+impl Parse for TakeAdd {
+    fn parse(input: &str) -> IResult<&str, Self> {
         let (input, left_expr) = TakeFactor::parse(input)?;
         let (input, right_option) = opt((
             space0,
@@ -206,8 +219,8 @@ impl TakeAdd {
     }
 }
 
-impl NamedTakeAdd {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+impl Parse for NamedTakeAdd {
+    fn parse(input: &str) -> IResult<&str, Self> {
         fn parse_name(input: &str) -> IResult<&str, String> {
             let (input, slice) = many0(alt((alpha1, space1))).parse(input)?;
             let (input, _) = tag(":")(input)?;
@@ -227,8 +240,8 @@ impl NamedTakeAdd {
     }
 }
 
-impl NamedList {
-    pub fn parse(input: &str) -> IResult<&str, Self> {
+impl Parse for NamedList {
+    fn parse(input: &str) -> IResult<&str, Self> {
         let mut expressions: Vec<NamedTakeAdd> = Vec::new();
 
         let (input, named_take) = NamedTakeAdd::parse(input)?;

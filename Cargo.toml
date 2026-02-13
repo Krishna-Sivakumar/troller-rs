@@ -14,4 +14,9 @@ rand = "0.9.2"
 resvg = "0.46.0"
 rusqlite = "0.38.0"
 serde = "1.0.228"
+# Including songbird alone gives you support for Opus via the DCA file format.
+songbird = { version = "0.5.0", features = ["builtin-queue"] }
 tokio = { version = "1.49.0", features = ["rt-multi-thread"] }
+# To get additional codecs, you *must* add Symphonia yourself.
+# This includes the default formats (MKV/WebM, Ogg, Wave) and codecs (FLAC, PCM, Vorbis)...
+symphonia = { version = "0.5", features = ["aac", "mp3", "mpa", "mkv"]}

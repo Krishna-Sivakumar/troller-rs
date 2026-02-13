@@ -9,8 +9,8 @@ use commands::*;
 use futures::lock::Mutex;
 use poise::serenity_prelude::futures::{self};
 use poise::serenity_prelude::{self as serenity};
+use songbird::SerenityInit;
 use std::env::args;
-use std::ffi::OsString;
 
 #[allow(unused)]
 fn cli() {
@@ -66,9 +66,18 @@ fn cli() {
 async fn main() {
     let token =
         std::env::var("DISCORD_TOKEN").expect("Missing DISCORD_TOKEN environment variable.");
-    let intents = serenity::GatewayIntents::non_privileged();
+    let intents =
+        serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::GUILD_VOICE_STATES;
 
     let database = Mutex::new(DB::new().expect("Could not initialize database."));
+
+    let music_dir = std::env::var_os("MUSIC_DIR")
+        .expect("no MUSIC_DIR variable set in the environment.")
+        .to_owned();
+    let music_dir = std::path::PathBuf::from(music_dir);
+    music_dir
+        .try_exists()
+        .expect("MUSIC_DIR environment variable does not point to a valid path.");
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
@@ -78,19 +87,13 @@ async fn main() {
                 display_clock(),
                 remove_progress_clock(),
                 bump_progress_clock(),
-                play_music(),
+                help(),
+                play_music::music(),
+                play_music::leave(),
             ],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
-            let music_dir = std::env::var_os("MUSIC_DIR")
-                .expect("no MUSIC_DIR variable set in the environment.")
-                .to_owned();
-            let music_dir = std::path::PathBuf::from(music_dir);
-            music_dir
-                .try_exists()
-                .expect("MUSIC_DIR environment variable does not point to a valid path.");
-
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data {
@@ -103,6 +106,7 @@ async fn main() {
 
     let client = serenity::ClientBuilder::new(token, intents)
         .framework(framework)
+        .register_songbird()
         .await;
 
     client

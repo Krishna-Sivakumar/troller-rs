@@ -1,4 +1,4 @@
-use std::{ffi::OsString, fs, path::PathBuf, str::pattern::Pattern};
+use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
     db::{DB, ProgressClock},
@@ -19,7 +19,8 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 static EMBED_OK_TUPLE: &'static (u8, u8, u8) = &(118, 164, 93);
 static EMBED_ERR_TUPLE: &'static (u8, u8, u8) = &(159, 7, 18);
 
-fn capitalize_string(input: &String) -> String {
+/// Breaks up a string and capitalizes every word.
+fn capitalize_string(input: &str) -> String {
     let words: Vec<String> = input
         .split_whitespace()
         .into_iter()
@@ -32,6 +33,83 @@ fn capitalize_string(input: &String) -> String {
     words.join(" ")
 }
 
+/// Returns an error-flavoured `CreateEmbed`  with a capitalized `title` and a `message`
+fn create_error_embed<'a>(title: &'a str, message: &'a str) -> CreateEmbed {
+    CreateEmbed::new()
+        .color(*EMBED_ERR_TUPLE)
+        .title(capitalize_string(title))
+        .field("", message, false)
+}
+
+pub async fn help_command_autocomplete<'a>(
+    ctx: Context<'_>,
+    partial: &'a str,
+) -> impl Stream<Item = String> + 'a {
+    let name_refs: Vec<String> = ctx
+        .framework()
+        .options()
+        .commands
+        .iter()
+        .map(|cmd| cmd.name.clone())
+        .filter(|name| name.starts_with(partial))
+        .collect();
+
+    futures::stream::iter(name_refs)
+}
+
+/// Displays help text for commands in Troller.
+#[poise::command(slash_command)]
+pub async fn help(
+    ctx: Context<'_>,
+    #[description = "Name of the command"]
+    #[autocomplete = "help_command_autocomplete"]
+    command_name: String,
+) -> Result<(), Error> {
+    let cmd_descriptions = ctx
+        .framework()
+        .options()
+        .commands
+        .iter()
+        .map(|cmd| (cmd.name.clone(), cmd.help_text.clone()))
+        .filter(|(name, _)| name.cmp(&"help".to_owned()).is_ne())
+        .fold(HashMap::new(), |mut map, (cmd_name, help_text)| {
+            map.insert(cmd_name, help_text.unwrap_or_default());
+            map
+        });
+
+    let embed = match cmd_descriptions.get(&command_name) {
+        Some(help_text) => CreateEmbed::new()
+            .color(*EMBED_OK_TUPLE)
+            .title(format!("Help for `/{}`", command_name.clone()))
+            .field("", help_text, false),
+        None => create_error_embed(
+            "Invalid command name",
+            "The command you're looking for doesn't exist.",
+        ),
+    };
+
+    ctx.send(poise::CreateReply {
+        embeds: vec![embed],
+        ephemeral: Some(true),
+        reply: true,
+        ..Default::default()
+    })
+    .await?;
+
+    Ok(())
+}
+
+/// Roll dice using standard dice notation.
+///
+/// **Example Usage:**
+/// `/roll 1d20 + 5`: Rolls a d20 and adds 5 to the result.
+/// `/roll 1d20 + 6, 1d8 + 4`: Rolls a d20 and a d8 at the same time.
+/// `/roll hit: 1d20 + 5`: Rolls dice and adds the name "hit" to the particular roll.
+/// `/roll hit: 1d20 + 6, damage: 1d8 + 4`: Rolls the dice and attaches names to the rolls.
+/// `/roll 2d20h1`: Rolls 2 d20s and takes the highest one.
+/// `/roll 4d6h3`: Rolls 4 d6s and takes the highest three.
+/// `/roll 2d20l1`: Rolls 2 d20s and takes the lowest one.
+/// `/roll 5 * 3d6`: Multiplies 5 to the result of the 3d6 roll. It *does not* roll 15 sets of dice.
 #[poise::command(slash_command)]
 pub async fn roll(
     ctx: Context<'_>,
@@ -47,10 +125,10 @@ pub async fn roll(
                     .iter()
                     .map(|result| (result.name.clone(), result.value.clone(), false)),
             ),
-        Err(_) => CreateEmbed::new()
-            .color(*EMBED_ERR_TUPLE)
-        .title("Roll Error")
-        .field("", "The entered dice text was not valid. Take a look at the /help command for a guide on how to use the bot!", false)
+        Err(_) => create_error_embed(
+            "Roll Error",
+            "The entered dice text was not valid. Take a look at the /help command for a guide on how to use the bot!",
+        ),
     };
     ctx.send(poise::CreateReply {
         embeds: vec![response],
@@ -62,6 +140,11 @@ pub async fn roll(
     Ok(())
 }
 
+/// Create a new progress clock to track goals or countdowns.
+///
+/// **Example Usage:**
+/// `/add_progress_clock segments:6 name:Escape Plan` - Create a 6-segment clock named "Escape Plan"
+/// `/add_progress_clock segments:8 name:Ritual segments_filled:3 color:#FF5733 display_now:true` - Create an 8-segment clock with 3 segments already filled, custom color, and display immediately
 #[poise::command(slash_command)]
 pub async fn add_progress_clock(
     ctx: Context<'_>,
@@ -122,10 +205,9 @@ pub async fn add_progress_clock(
         Err(e) => {
             println!("{}", e.to_string());
             ctx.send(poise::CreateReply {
-                embeds: vec![CreateEmbed::new().color(*EMBED_ERR_TUPLE).field(
-                    "Internal Error",
-                    format!("Could not save your clock: {}", e),
-                    false,
+                embeds: vec![create_error_embed(
+                    "internal error",
+                    &format!("Could not save your clock: {}", e),
                 )],
                 ephemeral: Some(true),
                 reply: true,
@@ -138,6 +220,8 @@ pub async fn add_progress_clock(
     Ok(())
 }
 
+/// Delete a progress clock.
+///
 #[poise::command(slash_command)]
 pub async fn remove_progress_clock(
     ctx: Context<'_>,
@@ -169,10 +253,9 @@ pub async fn remove_progress_clock(
         Err(e) => {
             println!("{}", e.to_string());
             ctx.send(poise::CreateReply {
-                embeds: vec![CreateEmbed::new().color(*EMBED_ERR_TUPLE).field(
-                    "Internal Error",
+                embeds: vec![create_error_embed(
+                    "internal error",
                     "Could not remove your clock.",
-                    false,
                 )],
                 ephemeral: Some(true),
                 reply: true,
@@ -184,6 +267,12 @@ pub async fn remove_progress_clock(
     Ok(())
 }
 
+/// Advance a progress clock by filling in more segments.
+///
+/// **Example Usage:**
+/// `/bump_progress_clock name:Escape Plan` - Advance "Escape Plan" by 1 segment
+/// `/bump_progress_clock name:Escape Plan count:2` - Advance "Escape Plan" by 2 segments
+///
 #[poise::command(slash_command)]
 pub async fn bump_progress_clock(
     ctx: Context<'_>,
@@ -227,10 +316,9 @@ pub async fn bump_progress_clock(
         Err(e) => {
             println!("{}", e.to_string());
             ctx.send(poise::CreateReply {
-                embeds: vec![CreateEmbed::new().color(*EMBED_ERR_TUPLE).field(
-                    "Internal Error",
+                embeds: vec![create_error_embed(
+                    "internal error",
                     "Could not bump clock's count.",
-                    false,
                 )],
                 ephemeral: Some(true),
                 reply: true,
@@ -264,6 +352,11 @@ pub async fn display_clock_name_autocomplete<'a>(
     futures::stream::iter(items)
 }
 
+/// Show an existing progress clock.
+///
+/// **Example Usage:**
+/// `/display_clock name:Escape Plan` - Display the current state of "Escape Plan"
+///
 #[poise::command(slash_command)]
 pub async fn display_clock(
     ctx: Context<'_>,
@@ -321,45 +414,190 @@ pub async fn display_clock(
     Ok(())
 }
 
-pub async fn music_file_autocomplete<'a>(
-    ctx: Context<'_>,
-    partial: &'a str,
-) -> impl Stream<Item = String> + 'a {
-    let completions: std::io::Result<Vec<String>> = ctx
-        .data()
-        .music_dir
-        .read_dir()
-        .map(|entries| {
-            entries.map(|entry| match entry {
-                Ok(entry) => entry
-                    .path()
-                    .strip_prefix(&ctx.data().music_dir)
-                    .expect("Could not strip prefix.")
-                    .to_str()
-                    .expect("Couldn't convert non-utf8 path to string.")
-                    .to_owned(),
-                Err(_) => String::new(),
+pub mod play_music {
+    use crate::commands::{Data, EMBED_OK_TUPLE, Error, create_error_embed};
+    use songbird::{
+        TrackEvent,
+        events::{Event, EventContext, EventHandler},
+    };
+
+    struct TrackErrorNotifier;
+
+    #[serenity_prelude::async_trait]
+    impl EventHandler for TrackErrorNotifier {
+        async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
+            if let EventContext::Track(track_list) = ctx {
+                for (state, handle) in *track_list {
+                    println!(
+                        "Track {:?} encountered an error: {:?}",
+                        handle.uuid(),
+                        state.playing
+                    );
+                }
+            }
+
+            None
+        }
+    }
+
+    use poise::serenity_prelude::{
+        self, CreateEmbed,
+        futures::{self, Stream},
+    };
+    type Context<'a> = poise::Context<'a, Data, Error>;
+
+    pub async fn music_file_autocomplete<'a>(
+        ctx: Context<'_>,
+        partial: &'a str,
+    ) -> impl Stream<Item = String> + 'a {
+        let completions: std::io::Result<Vec<String>> = ctx
+            .data()
+            .music_dir
+            .read_dir()
+            .map(|entries| {
+                entries.map(|entry| match entry {
+                    Ok(entry) => entry
+                        .path()
+                        .strip_prefix(&ctx.data().music_dir)
+                        .expect("Could not strip prefix.")
+                        .to_str()
+                        .expect("Couldn't convert non-utf8 path to string.")
+                        .to_owned(),
+                    Err(_) => String::new(),
+                })
             })
+            .map(|paths| {
+                paths
+                    .filter(|path| path.len() > 0 && path.starts_with(partial))
+                    .take(15)
+                    .collect()
+            });
+        futures::stream::iter(completions.unwrap_or(vec![]))
+    }
+
+    #[poise::command(slash_command)]
+    pub async fn leave(ctx: Context<'_>) -> Result<(), Error> {
+        let not_in_vc_error = create_error_embed(
+            "Not in a voice chat.",
+            "Troller is not in a voice chat in this guild.",
+        );
+
+        let manager = songbird::get(&ctx.serenity_context())
+            .await
+            .expect("could not find serenity manager.");
+
+        let embed = match ctx.guild_id() {
+            Some(guild_id) => {
+                let has_handler = manager.get(guild_id).is_some();
+                if has_handler {
+                    if let Err(e) = manager.remove(guild_id).await {
+                        create_error_embed(
+                            "Could not leave voice channel",
+                            &format!("Could not leave voice channel due to this error: {e}"),
+                        )
+                    } else {
+                        CreateEmbed::new()
+                            .color(*EMBED_OK_TUPLE)
+                            .title("Left voice channel.")
+                            .field("", "Successfully left the voice channel.", false)
+                    }
+                } else {
+                    not_in_vc_error
+                }
+            }
+            None => not_in_vc_error,
+        };
+
+        ctx.send(poise::CreateReply {
+            embeds: vec![embed],
+            ephemeral: Some(true),
+            reply: true,
+            ..Default::default()
         })
-        .map(|paths| {
-            paths
-                .filter(|path| path.len() > 0 && path.starts_with(partial))
-                .collect()
-        });
-    futures::stream::iter(completions.unwrap_or(vec![]))
-}
+        .await?;
 
-#[poise::command(slash_command)]
-pub async fn play_music_file(
-    ctx: Context<'_>,
-    #[description = "pick file"]
-    #[autocomplete = "music_file_autocomplete"]
-    filename: String,
-) -> Result<(), Error> {
-    Ok(())
-}
+        Ok(())
+    }
 
-#[poise::command(slash_command, subcommand_required, subcommands("play_music_file"))]
-pub async fn play_music(ctx: Context<'_>) -> Result<(), Error> {
-    Ok(())
+    #[poise::command(slash_command)]
+    pub async fn file(
+        ctx: Context<'_>,
+        #[description = "pick file"]
+        #[autocomplete = "music_file_autocomplete"]
+        filename: String,
+    ) -> Result<(), Error> {
+        let mut path = ctx.data().music_dir.clone();
+        path.push(&filename);
+
+        println!("file at {:#?}", path);
+
+        let not_in_vc_error = create_error_embed(
+            "Not in a voice chat.",
+            "Troller is not in a voice chat in this guild.",
+        );
+
+        ctx.defer_ephemeral().await?;
+
+        let manager = songbird::get(&ctx.serenity_context())
+            .await
+            .expect("could not find serenity manager.");
+
+        let embed = match ctx.guild_id() {
+            Some(guild_id) => {
+                println!("got guild");
+                let channel_id = ctx
+                    .guild()
+                    .unwrap()
+                    .voice_states
+                    .get(&ctx.author().id)
+                    .and_then(|voice_state| voice_state.channel_id);
+
+                match channel_id {
+                    Some(channel_id) => {
+                        let call = manager.join(guild_id, channel_id).await?;
+                        let mut inner_call = call.lock().await;
+                        println!("got call");
+
+                        inner_call
+                            .add_global_event(Event::Track(TrackEvent::Error), TrackErrorNotifier);
+                        println!("attached event handler");
+
+                        println!("file exists? {}", path.exists());
+                        let file = songbird::input::File::new(path);
+
+                        let handle = inner_call.play_input(file.into());
+
+                        handle.play()?;
+
+                        println!("{:?}", handle.get_info().await);
+                        println!("playing input");
+
+                        not_in_vc_error
+                    }
+                    None => not_in_vc_error,
+                }
+            }
+            _ => not_in_vc_error,
+        };
+
+        ctx.send(poise::CreateReply {
+            embeds: vec![embed],
+            ephemeral: Some(true),
+            reply: true,
+            ..Default::default()
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    #[poise::command(
+        slash_command,
+        subcommand_required,
+        subcommands("file", "leave"),
+        guild_only
+    )]
+    pub async fn music(_: Context<'_>) -> Result<(), Error> {
+        Ok(())
+    }
 }

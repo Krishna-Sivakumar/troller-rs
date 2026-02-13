@@ -3,6 +3,7 @@ pub mod display;
 pub mod eval;
 pub mod parser;
 
+use nom::IResult;
 use parser::{NamedList, TakeAdd};
 use std::{ops::Range, time::Instant};
 
@@ -18,6 +19,12 @@ pub trait Compile {
 pub trait Eval {
     /// Returns the summed roll of a node.
     fn eval(&self) -> u32;
+}
+
+/// This trait is implemented by structs that can parse a version of themselves out from a string.
+pub trait Parse<NodeType = Self> {
+    /// Returns a result of the remaining `input` and the parsed struct `Self` if it can be parsed from `input`.
+    fn parse(input: &str) -> IResult<&str, NodeType>;
 }
 
 pub struct RollResult {

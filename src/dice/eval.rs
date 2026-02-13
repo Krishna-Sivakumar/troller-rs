@@ -26,14 +26,6 @@ impl From<&OpAdd> for Op {
     }
 }
 
-/// Represents the node types for a compiled Roll AST
-pub enum RollHand {
-    /// one or more rolls
-    Roll(Roll),
-    /// combines rolls with a binary operator
-    RollNode(RollNode),
-}
-
 /// Represents a set of rolled dice
 pub struct Roll {
     /// individual rolls
@@ -42,6 +34,14 @@ pub struct Roll {
     pub limit: Option<u32>,
     /// size of die rolled
     pub die: Option<u32>,
+}
+
+/// Represents the node types for a compiled Roll AST
+pub enum RollHand {
+    /// one or more rolls
+    Roll(Roll),
+    /// combines rolls with a binary operator
+    RollNode(RollNode),
 }
 
 /// represents a combination of roll nodes with a binary operator.
