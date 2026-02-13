@@ -415,10 +415,13 @@ pub async fn display_clock(
 }
 
 pub mod play_music {
+    use std::sync::Arc;
+
     use crate::commands::{Data, EMBED_OK_TUPLE, Error, create_error_embed};
     use songbird::{
         TrackEvent,
         events::{Event, EventContext, EventHandler},
+        tracks::PlayMode,
     };
 
     struct TrackErrorNotifier;
@@ -529,8 +532,6 @@ pub mod play_music {
         let mut path = ctx.data().music_dir.clone();
         path.push(&filename);
 
-        println!("file at {:#?}", path);
-
         let not_in_vc_error = create_error_embed(
             "Not in a voice chat.",
             "Troller is not in a voice chat in this guild.",
@@ -544,7 +545,6 @@ pub mod play_music {
 
         let embed = match ctx.guild_id() {
             Some(guild_id) => {
-                println!("got guild");
                 let channel_id = ctx
                     .guild()
                     .unwrap()
@@ -556,21 +556,16 @@ pub mod play_music {
                     Some(channel_id) => {
                         let call = manager.join(guild_id, channel_id).await?;
                         let mut inner_call = call.lock().await;
-                        println!("got call");
 
                         inner_call
                             .add_global_event(Event::Track(TrackEvent::Error), TrackErrorNotifier);
-                        println!("attached event handler");
 
-                        println!("file exists? {}", path.exists());
                         let file = songbird::input::File::new(path);
 
-                        let handle = inner_call.play_input(file.into());
+                        inner_call.queue().stop();
 
-                        handle.play()?;
-
-                        println!("{:?}", handle.get_info().await);
-                        println!("playing input");
+                        let handle = inner_call.enqueue_input(file.into());
+                        handle.await.play()?;
 
                         not_in_vc_error
                     }
@@ -591,10 +586,63 @@ pub mod play_music {
         Ok(())
     }
 
+    /// If a track is playing, toggle its paused state.
+    #[poise::command(slash_command)]
+    pub async fn pause(ctx: Context<'_>) -> Result<(), Error> {
+        let not_in_vc_error = create_error_embed(
+            "Not in a voice chat.",
+            "Troller is not in a voice chat in this guild.",
+        );
+
+        ctx.defer_ephemeral().await?;
+
+        let manager = songbird::get(&ctx.serenity_context())
+            .await
+            .expect("could not find serenity manager.");
+
+        let embed = match ctx.guild_id() {
+            Some(guild_id) => match manager.get(guild_id) {
+                Some(manager) => {
+                    let inner_call = manager.lock().await;
+                    match inner_call.queue().current() {
+                        Some(track_handle) => {
+                            match track_handle.get_info().await.unwrap().playing {
+                                PlayMode::Play => {
+                                    track_handle.pause()?;
+                                }
+                                PlayMode::Pause => {
+                                    track_handle.play()?;
+                                }
+                                _ => {}
+                            }
+                        }
+                        None => {
+                            println!("no current tracks");
+                        }
+                    }
+
+                    not_in_vc_error // TODO fix these embeds
+                }
+                None => not_in_vc_error,
+            },
+            _ => not_in_vc_error,
+        };
+
+        ctx.send(poise::CreateReply {
+            embeds: vec![embed],
+            ephemeral: Some(true),
+            reply: true,
+            ..Default::default()
+        })
+        .await?;
+
+        Ok(())
+    }
+
     #[poise::command(
         slash_command,
         subcommand_required,
-        subcommands("file", "leave"),
+        subcommands("file", "leave", "pause"),
         guild_only
     )]
     pub async fn music(_: Context<'_>) -> Result<(), Error> {
