@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use crate::{
     db::{DB, ProgressClock},
@@ -12,6 +12,7 @@ use poise::serenity_prelude::{CreateAttachment, CreateEmbed};
 pub struct Data {
     pub db: Mutex<DB>,
     pub music_dir: PathBuf,
+    pub track_list: Arc<Mutex<Vec<String>>>,
 }
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -422,6 +423,8 @@ pub async fn display_clock(
 
 pub mod play_music {
 
+    use std::sync::Arc;
+
     use crate::commands::{Data, Error, create_error_embed, create_quick_success_embed};
     use songbird::{
         Call, TrackEvent,
@@ -455,13 +458,21 @@ pub mod play_music {
     use tokio::sync::MutexGuard;
     type Context<'a> = poise::Context<'a, Data, Error>;
 
-    async fn perform_call_action<F, A>(
+    async fn perform_call_action<F, A, B>(
         ctx: Context<'_>,
         join_if_absent: bool,
         operation: F,
+        args: B,
     ) -> Result<A, Error>
     where
-        F: AsyncFn(MutexGuard<'_, Call>) -> Result<A, Error>,
+        F: AsyncFn(
+            (
+                Arc<songbird::Songbird>,
+                MutexGuard<'_, Call>,
+                poise::serenity_prelude::GuildId,
+            ),
+            B,
+        ) -> Result<A, Error>,
     {
         let manager = songbird::get(&ctx.serenity_context())
             .await
@@ -470,7 +481,7 @@ pub mod play_music {
             Some(guild_id) => match manager.get(guild_id) {
                 Some(call) => {
                     let inner_call = call.lock().await;
-                    operation(inner_call).await
+                    operation((manager, inner_call, guild_id), args).await
                 }
 
                 None => {
@@ -486,7 +497,7 @@ pub mod play_music {
                             Some(channel_id) => {
                                 let call = manager.join(guild_id, channel_id).await?;
                                 let inner_call = call.lock().await;
-                                operation(inner_call).await
+                                operation((manager, inner_call, guild_id), args).await
                             }
                             None => Err("Not in a voice chat.".into()),
                         }
@@ -542,17 +553,22 @@ pub mod play_music {
             "Troller is not in a voice chat in this guild.",
         );
 
-        let embed = perform_call_action(ctx, false, async |mut call| {
-            call.leave().await?;
-            Ok(create_quick_success_embed(
+        ctx.defer().await?;
+
+        let manager = songbird::get(&ctx.serenity_context())
+            .await
+            .expect("Could not find serenity maanger");
+
+        let embed = match manager.remove(ctx.guild_id().unwrap()).await {
+            Ok(_) => create_quick_success_embed(
                 "left voice channel",
                 "Successfully left the voice channel.",
-            ))
-        })
-        .await;
+            ),
+            Err(_) => not_in_vc_error,
+        };
 
         ctx.send(poise::CreateReply {
-            embeds: vec![embed.unwrap_or(not_in_vc_error)],
+            embeds: vec![embed],
             ephemeral: Some(true),
             reply: true,
             ..Default::default()
@@ -562,7 +578,6 @@ pub mod play_music {
         Ok(())
     }
 
-    /// ### `/music enqueue`
     /// Add an audio file to the playback queue and optionally join the voice channel.
     ///
     /// **Options:**
@@ -581,33 +596,62 @@ pub mod play_music {
         ctx: Context<'_>,
         #[description = "pick file"]
         #[autocomplete = "music_file_autocomplete"]
-        filename: String,
+        filename: Option<String>,
+        #[description = "youtube url"] youtube_url: Option<String>,
         #[description = "play now?"] play_now: Option<bool>,
     ) -> Result<(), Error> {
-        let mut path = ctx.data().music_dir.clone();
-        path.push(&filename);
+        let path = ctx.data().music_dir.clone();
 
         let not_in_vc_error = create_error_embed(
-            "Not in a voice chat.",
+            "not in a voice chat",
             "Troller is not in a voice chat in this guild.",
         );
 
         ctx.defer_ephemeral().await?;
 
-        let embed = perform_call_action(ctx, true, async move |mut call| {
-            call.add_global_event(Event::Track(TrackEvent::Error), TrackErrorNotifier);
-            let file = songbird::input::File::new(path.clone());
-            let handle = call.enqueue_input(file.into()).await;
+        let embed = perform_call_action(
+            ctx,
+            true,
+            async move |(_, mut call, _), (path, filename, youtube_url)| {
+                call.add_global_event(Event::Track(TrackEvent::Error), TrackErrorNotifier);
+                let mut path_clone = path.clone();
+                let mut track_name: String = String::new();
+                let input: Option<songbird::input::Input> = match filename {
+                    Some(filename) => {
+                        path_clone.push(&filename);
+                        track_name.push_str(&filename);
+                        Some(songbird::input::File::new(path_clone.clone()).into())
+                    }
+                    None => match youtube_url {
+                        Some(url) => {
+                            track_name.push_str(&url);
+                            let http_client = reqwest::Client::new();
+                            Some(songbird::input::YoutubeDl::new(http_client, url).into())
+                        }
+                        None => None,
+                    },
+                };
 
-            if let Some(true) = play_now {
-                handle.play()?;
-            }
+                match input {
+                    Some(input) => {
+                        let handle = call.enqueue_input(input.into()).await;
+                        if !play_now.unwrap_or(false) {
+                            handle.pause()?;
+                        }
 
-            Ok(create_quick_success_embed(
-                "action successful",
-                &format!("enqueued track {}", path.to_str().unwrap()),
-            ))
-        })
+                        Ok(create_quick_success_embed(
+                            "action successful",
+                            &format!("Enqueued Track {}", track_name),
+                        ))
+                    }
+                    None => Ok(create_error_embed(
+                        "action unsuccessful",
+                        "No input specified.",
+                    )),
+                }
+            },
+            (path, filename, youtube_url),
+        )
         .await;
 
         ctx.send(poise::CreateReply {
@@ -653,44 +697,49 @@ pub mod play_music {
 
         let action_string = action.to_owned();
 
-        let embed = perform_call_action(ctx, true, async move |call| {
-            let header = "action successful";
-            Ok(match call.queue().current() {
-                Some(track_handle) => match action_string.as_str() {
-                    "pause" => {
-                        track_handle.pause()?;
-                        create_quick_success_embed(header, "Paused track.")
-                    }
-                    "play" => {
-                        track_handle.play()?;
-                        create_quick_success_embed(header, "Playing track.")
-                    }
-                    "stop" => {
-                        track_handle.stop()?;
-                        create_quick_success_embed(header, "Stopped track.")
-                    }
-                    "skip" => {
-                        call.queue().skip()?;
-                        create_quick_success_embed(header, "Skipped track.")
-                    }
-                    "loop_toggle" => {
-                        let info = track_handle.get_info().await.unwrap();
-                        match info.loops {
-                            LoopState::Finite(0) => {
-                                track_handle.enable_loop()?;
-                                create_quick_success_embed(header, "Looping track.")
-                            }
-                            _ => {
-                                track_handle.disable_loop()?;
-                                create_quick_success_embed(header, "Stopped looping track.")
+        let embed = perform_call_action(
+            ctx,
+            true,
+            async move |(_, call, _), _| {
+                let header = "action successful";
+                Ok(match call.queue().current() {
+                    Some(track_handle) => match action_string.as_str() {
+                        "pause" => {
+                            track_handle.pause()?;
+                            create_quick_success_embed(header, "Paused track.")
+                        }
+                        "play" => {
+                            track_handle.play()?;
+                            create_quick_success_embed(header, "Playing track.")
+                        }
+                        "stop" => {
+                            track_handle.stop()?;
+                            create_quick_success_embed(header, "Stopped track.")
+                        }
+                        "skip" => {
+                            call.queue().skip()?;
+                            create_quick_success_embed(header, "Skipped track.")
+                        }
+                        "loop_toggle" => {
+                            let info = track_handle.get_info().await.unwrap();
+                            match info.loops {
+                                LoopState::Finite(0) => {
+                                    track_handle.enable_loop()?;
+                                    create_quick_success_embed(header, "Looping track.")
+                                }
+                                _ => {
+                                    track_handle.disable_loop()?;
+                                    create_quick_success_embed(header, "Stopped looping track.")
+                                }
                             }
                         }
-                    }
-                    _ => create_error_embed("invalid action", "Cannot perform that action."),
-                },
-                None => create_error_embed("invalid action", "No items in the queue."),
-            })
-        })
+                        _ => create_error_embed("invalid action", "Cannot perform that action."),
+                    },
+                    None => create_error_embed("invalid action", "No items in the queue."),
+                })
+            },
+            (),
+        )
         .await;
 
         ctx.send(poise::CreateReply {

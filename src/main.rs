@@ -11,6 +11,7 @@ use poise::serenity_prelude::futures::{self};
 use poise::serenity_prelude::{self as serenity};
 use songbird::SerenityInit;
 use std::env::args;
+use std::sync::Arc;
 
 #[allow(unused)]
 fn cli() {
@@ -99,6 +100,7 @@ async fn main() {
                 Ok(Data {
                     db: database,
                     music_dir,
+                    track_list: Arc::new(Mutex::new(vec![])),
                 })
             })
         })
