@@ -2,9 +2,10 @@
 
 A Discord bot to help me run D&D!
 
-Currently Troller does two things:
+Currently Troller does three things:
 1. Creates and manages Progress Clocks (Blades in the Dark style)
 2. Rolls dice
+3. Plays music in a local directory
 
 ## Installation (Linux)
 
