@@ -25,7 +25,7 @@ fn capitalize_string(input: &str) -> String {
         .split_whitespace()
         .into_iter()
         .map(|word| {
-            let mut w = word.to_lowercase().to_owned();
+            let mut w = word.to_lowercase();
             w.replace_range(0..1, &w[0..1].to_uppercase());
             w
         })
@@ -37,6 +37,13 @@ fn capitalize_string(input: &str) -> String {
 fn create_error_embed<'a>(title: &'a str, message: &'a str) -> CreateEmbed {
     CreateEmbed::new()
         .color(*EMBED_ERR_TUPLE)
+        .title(capitalize_string(title))
+        .field("", message, false)
+}
+
+fn create_quick_success_embed<'a>(title: &'a str, message: &'a str) -> CreateEmbed {
+    CreateEmbed::new()
+        .color(*EMBED_OK_TUPLE)
         .title(capitalize_string(title))
         .field("", message, false)
 }
@@ -78,10 +85,9 @@ pub async fn help(
         });
 
     let embed = match cmd_descriptions.get(&command_name) {
-        Some(help_text) => CreateEmbed::new()
-            .color(*EMBED_OK_TUPLE)
-            .title(format!("Help for `/{}`", command_name.clone()))
-            .field("", help_text, false),
+        Some(help_text) => {
+            create_quick_success_embed(&format!("Help for `/{}`", command_name.clone()), &help_text)
+        }
         None => create_error_embed(
             "Invalid command name",
             "The command you're looking for doesn't exist.",
@@ -415,13 +421,12 @@ pub async fn display_clock(
 }
 
 pub mod play_music {
-    use std::sync::Arc;
 
-    use crate::commands::{Data, EMBED_OK_TUPLE, Error, create_error_embed};
+    use crate::commands::{Data, Error, create_error_embed, create_quick_success_embed};
     use songbird::{
-        TrackEvent,
+        Call, TrackEvent,
         events::{Event, EventContext, EventHandler},
-        tracks::PlayMode,
+        tracks::LoopState,
     };
 
     struct TrackErrorNotifier;
@@ -444,38 +449,87 @@ pub mod play_music {
     }
 
     use poise::serenity_prelude::{
-        self, CreateEmbed,
+        self,
         futures::{self, Stream},
     };
+    use tokio::sync::MutexGuard;
     type Context<'a> = poise::Context<'a, Data, Error>;
 
-    pub async fn music_file_autocomplete<'a>(
+    async fn perform_call_action<F, A>(
         ctx: Context<'_>,
+        join_if_absent: bool,
+        operation: F,
+    ) -> Result<A, Error>
+    where
+        F: AsyncFn(MutexGuard<'_, Call>) -> Result<A, Error>,
+    {
+        let manager = songbird::get(&ctx.serenity_context())
+            .await
+            .expect("Could not find serenity maanger");
+        match ctx.guild_id() {
+            Some(guild_id) => match manager.get(guild_id) {
+                Some(call) => {
+                    let inner_call = call.lock().await;
+                    operation(inner_call).await
+                }
+
+                None => {
+                    if join_if_absent {
+                        let channel_id = ctx
+                            .guild()
+                            .unwrap()
+                            .voice_states
+                            .get(&ctx.author().id)
+                            .and_then(|voice_state| voice_state.channel_id);
+
+                        match channel_id {
+                            Some(channel_id) => {
+                                let call = manager.join(guild_id, channel_id).await?;
+                                let inner_call = call.lock().await;
+                                operation(inner_call).await
+                            }
+                            None => Err("Not in a voice chat.".into()),
+                        }
+                    } else {
+                        Err("Not in a voice chat.".into())
+                    }
+                }
+            },
+            None => Err("Not in a voice chat.".into()),
+        }
+    }
+
+    pub async fn music_file_autocomplete<'a>(
+        ctx: Context<'a>,
         partial: &'a str,
     ) -> impl Stream<Item = String> + 'a {
-        let completions: std::io::Result<Vec<String>> = ctx
-            .data()
-            .music_dir
+        let music_dir = ctx.data().music_dir.clone();
+        let completions: Vec<String> = music_dir
             .read_dir()
-            .map(|entries| {
-                entries.map(|entry| match entry {
-                    Ok(entry) => entry
-                        .path()
-                        .strip_prefix(&ctx.data().music_dir)
-                        .expect("Could not strip prefix.")
-                        .to_str()
-                        .expect("Couldn't convert non-utf8 path to string.")
-                        .to_owned(),
-                    Err(_) => String::new(),
+            .map(move |entries| {
+                entries.filter_map(move |entry| match entry {
+                    Ok(entry) => {
+                        let interim_entry = entry
+                            .path()
+                            .strip_prefix(&music_dir)
+                            .expect("Could not strip prefix.")
+                            .to_str()
+                            .expect("Couldn't convert non-utf8 path to string.")
+                            .to_owned();
+                        if interim_entry.starts_with(&partial) {
+                            Some(interim_entry)
+                        } else {
+                            None
+                        }
+                    }
+                    Err(_) => None,
                 })
             })
-            .map(|paths| {
-                paths
-                    .filter(|path| path.len() > 0 && path.starts_with(partial))
-                    .take(15)
-                    .collect()
-            });
-        futures::stream::iter(completions.unwrap_or(vec![]))
+            .expect("Could not read directory.")
+            .take(12) // this restriction is required to have the options load in time.
+            .collect();
+
+        futures::stream::iter(completions)
     }
 
     #[poise::command(slash_command)]
@@ -485,34 +539,17 @@ pub mod play_music {
             "Troller is not in a voice chat in this guild.",
         );
 
-        let manager = songbird::get(&ctx.serenity_context())
-            .await
-            .expect("could not find serenity manager.");
-
-        let embed = match ctx.guild_id() {
-            Some(guild_id) => {
-                let has_handler = manager.get(guild_id).is_some();
-                if has_handler {
-                    if let Err(e) = manager.remove(guild_id).await {
-                        create_error_embed(
-                            "Could not leave voice channel",
-                            &format!("Could not leave voice channel due to this error: {e}"),
-                        )
-                    } else {
-                        CreateEmbed::new()
-                            .color(*EMBED_OK_TUPLE)
-                            .title("Left voice channel.")
-                            .field("", "Successfully left the voice channel.", false)
-                    }
-                } else {
-                    not_in_vc_error
-                }
-            }
-            None => not_in_vc_error,
-        };
+        let embed = perform_call_action(ctx, false, async |mut call| {
+            call.leave().await?;
+            Ok(create_quick_success_embed(
+                "left voice channel",
+                "Successfully left the voice channel.",
+            ))
+        })
+        .await;
 
         ctx.send(poise::CreateReply {
-            embeds: vec![embed],
+            embeds: vec![embed.unwrap_or(not_in_vc_error)],
             ephemeral: Some(true),
             reply: true,
             ..Default::default()
@@ -523,11 +560,12 @@ pub mod play_music {
     }
 
     #[poise::command(slash_command)]
-    pub async fn file(
+    pub async fn enqueue(
         ctx: Context<'_>,
         #[description = "pick file"]
         #[autocomplete = "music_file_autocomplete"]
         filename: String,
+        #[description = "play now?"] play_now: Option<bool>,
     ) -> Result<(), Error> {
         let mut path = ctx.data().music_dir.clone();
         path.push(&filename);
@@ -539,44 +577,24 @@ pub mod play_music {
 
         ctx.defer_ephemeral().await?;
 
-        let manager = songbird::get(&ctx.serenity_context())
-            .await
-            .expect("could not find serenity manager.");
+        let embed = perform_call_action(ctx, true, async move |mut call| {
+            call.add_global_event(Event::Track(TrackEvent::Error), TrackErrorNotifier);
+            let file = songbird::input::File::new(path.clone());
+            let handle = call.enqueue_input(file.into()).await;
 
-        let embed = match ctx.guild_id() {
-            Some(guild_id) => {
-                let channel_id = ctx
-                    .guild()
-                    .unwrap()
-                    .voice_states
-                    .get(&ctx.author().id)
-                    .and_then(|voice_state| voice_state.channel_id);
-
-                match channel_id {
-                    Some(channel_id) => {
-                        let call = manager.join(guild_id, channel_id).await?;
-                        let mut inner_call = call.lock().await;
-
-                        inner_call
-                            .add_global_event(Event::Track(TrackEvent::Error), TrackErrorNotifier);
-
-                        let file = songbird::input::File::new(path);
-
-                        inner_call.queue().stop();
-
-                        let handle = inner_call.enqueue_input(file.into());
-                        handle.await.play()?;
-
-                        not_in_vc_error
-                    }
-                    None => not_in_vc_error,
-                }
+            if let Some(true) = play_now {
+                handle.play()?;
             }
-            _ => not_in_vc_error,
-        };
+
+            Ok(create_quick_success_embed(
+                "action successful",
+                &format!("enqueued track {}", path.to_str().unwrap()),
+            ))
+        })
+        .await;
 
         ctx.send(poise::CreateReply {
-            embeds: vec![embed],
+            embeds: vec![embed.unwrap_or(not_in_vc_error)],
             ephemeral: Some(true),
             reply: true,
             ..Default::default()
@@ -588,7 +606,10 @@ pub mod play_music {
 
     /// If a track is playing, toggle its paused state.
     #[poise::command(slash_command)]
-    pub async fn pause(ctx: Context<'_>) -> Result<(), Error> {
+    pub async fn control(
+        ctx: Context<'_>,
+        #[choices("pause", "play", "stop", "skip", "loop_toggle", "leave")] action: &'static str,
+    ) -> Result<(), Error> {
         let not_in_vc_error = create_error_embed(
             "Not in a voice chat.",
             "Troller is not in a voice chat in this guild.",
@@ -596,40 +617,50 @@ pub mod play_music {
 
         ctx.defer_ephemeral().await?;
 
-        let manager = songbird::get(&ctx.serenity_context())
-            .await
-            .expect("could not find serenity manager.");
+        let action_string = action.to_owned();
 
-        let embed = match ctx.guild_id() {
-            Some(guild_id) => match manager.get(guild_id) {
-                Some(manager) => {
-                    let inner_call = manager.lock().await;
-                    match inner_call.queue().current() {
-                        Some(track_handle) => {
-                            match track_handle.get_info().await.unwrap().playing {
-                                PlayMode::Play => {
-                                    track_handle.pause()?;
-                                }
-                                PlayMode::Pause => {
-                                    track_handle.play()?;
-                                }
-                                _ => {}
+        let embed = perform_call_action(ctx, true, async move |call| {
+            let header = "action successful";
+            Ok(match call.queue().current() {
+                Some(track_handle) => match action_string.as_str() {
+                    "pause" => {
+                        track_handle.pause()?;
+                        create_quick_success_embed(header, "Paused track.")
+                    }
+                    "play" => {
+                        track_handle.play()?;
+                        create_quick_success_embed(header, "Playing track.")
+                    }
+                    "stop" => {
+                        track_handle.stop()?;
+                        create_quick_success_embed(header, "Stopped track.")
+                    }
+                    "skip" => {
+                        call.queue().skip()?;
+                        create_quick_success_embed(header, "Skipped track.")
+                    }
+                    "loop_toggle" => {
+                        let info = track_handle.get_info().await.unwrap();
+                        match info.loops {
+                            LoopState::Finite(0) => {
+                                track_handle.enable_loop()?;
+                                create_quick_success_embed(header, "Looping track.")
+                            }
+                            _ => {
+                                track_handle.disable_loop()?;
+                                create_quick_success_embed(header, "Stopped looping track.")
                             }
                         }
-                        None => {
-                            println!("no current tracks");
-                        }
                     }
-
-                    not_in_vc_error // TODO fix these embeds
-                }
-                None => not_in_vc_error,
-            },
-            _ => not_in_vc_error,
-        };
+                    _ => create_error_embed("invalid action", "Cannot perform that action."),
+                },
+                None => create_error_embed("invalid action", "No items in the queue."),
+            })
+        })
+        .await;
 
         ctx.send(poise::CreateReply {
-            embeds: vec![embed],
+            embeds: vec![embed.unwrap_or(not_in_vc_error)],
             ephemeral: Some(true),
             reply: true,
             ..Default::default()
@@ -642,7 +673,7 @@ pub mod play_music {
     #[poise::command(
         slash_command,
         subcommand_required,
-        subcommands("file", "leave", "pause"),
+        subcommands("leave", "control", "enqueue"),
         guild_only
     )]
     pub async fn music(_: Context<'_>) -> Result<(), Error> {
