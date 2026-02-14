@@ -135,7 +135,6 @@ Control playback of the current track in the queue.
   - `stop` - Stop the current track completely
   - `skip` - Skip to the next track in the queue
   - `loop_toggle` - Toggle looping for the current track
-  - `leave` - Make the bot leave the voice channel
 
 **Example Usage:**
 - `/music control action:pause` - Pause playback
@@ -143,7 +142,7 @@ Control playback of the current track in the queue.
 - `/music control action:loop_toggle` - Enable/disable looping
 
 **Notes:**
-- Requires an active track in the queue (except for `leave`)
+- Requires an active track in the queue
 - Loop toggle switches between looping and non-looping states
 
 ---
