@@ -64,7 +64,7 @@ pub async fn help_command_autocomplete<'a>(
     futures::stream::iter(name_refs)
 }
 
-/// Displays help text for commands in Troller.
+/// Display help text and usage examples for any Troller command.
 #[poise::command(slash_command)]
 pub async fn help(
     ctx: Context<'_>,
@@ -532,6 +532,9 @@ pub mod play_music {
         futures::stream::iter(completions)
     }
 
+    /// Make the bot leave the current voice channel.
+    ///
+    /// Stops all playback and clears the queue
     #[poise::command(slash_command)]
     pub async fn leave(ctx: Context<'_>) -> Result<(), Error> {
         let not_in_vc_error = create_error_embed(
@@ -559,6 +562,20 @@ pub mod play_music {
         Ok(())
     }
 
+    /// ### `/music enqueue`
+    /// Add an audio file to the playback queue and optionally join the voice channel.
+    ///
+    /// **Options:**
+    /// - `filename` (required, autocomplete) - Select an audio file from the music directory
+    /// - `play_now` (optional) - Whether to start playing the track immediately (default: false)
+    ///
+    /// **Example Usage:**
+    /// - `/music enqueue filename:background_music.mp3` - Add a track to the queue
+    /// - `/music enqueue filename:boss_theme.mp3 play_now:true` - Add and immediately play a track
+    ///
+    /// **Notes:**
+    /// - The bot will automatically join your current voice channel if not already connected
+    /// - Files are autocompleted from the configured music directory
     #[poise::command(slash_command)]
     pub async fn enqueue(
         ctx: Context<'_>,
@@ -604,11 +621,29 @@ pub mod play_music {
         Ok(())
     }
 
-    /// If a track is playing, toggle its paused state.
+    /// Control playback of the current track in the queue.
+    ///
+    /// **Options:**
+    /// - `action` (required, choice) - The control action to perform:
+    /// - `pause` - Pause the currently playing track
+    /// - `play` - Resume a paused track
+    /// - `stop` - Stop the current track completely
+    /// - `skip` - Skip to the next track in the queue
+    /// - `loop_toggle` - Toggle looping for the current track
+    /// - `leave` - Make the bot leave the voice channel
+    ///   
+    /// **Example Usage:**
+    /// - `/music control action:pause` - Pause playback
+    /// - `/music control action:skip` - Skip to the next track
+    /// - `/music control action:loop_toggle` - Enable/disable looping
+    ///     
+    /// **Notes:**
+    /// - Requires an active track in the queue (except for `leave`)
+    /// - Loop toggle switches between looping and non-looping states
     #[poise::command(slash_command)]
     pub async fn control(
         ctx: Context<'_>,
-        #[choices("pause", "play", "stop", "skip", "loop_toggle", "leave")] action: &'static str,
+        #[choices("pause", "play", "stop", "skip", "loop_toggle")] action: &'static str,
     ) -> Result<(), Error> {
         let not_in_vc_error = create_error_embed(
             "Not in a voice chat.",

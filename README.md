@@ -93,7 +93,72 @@ Delete a progress clock.
 
 ---
 
-### Notes
+
+### `/help`
+Display help text and usage examples for any Troller command.
+
+**Options:**
+- `command_name` (required, autocomplete) - The name of the command to get help for
+
+**Example Usage:**
+- `/help command_name:roll` - Display detailed help for the `/roll` command
+- `/help command_name:add_progress_clock` - Display help for creating progress clocks
+
+---
+
+## Music Playback
+
+### `/music enqueue`
+Add an audio file to the playback queue and optionally join the voice channel.
+
+**Options:**
+- `filename` (required, autocomplete) - Select an audio file from the music directory
+- `play_now` (optional) - Whether to start playing the track immediately (default: false)
+
+**Example Usage:**
+- `/music enqueue filename:background_music.mp3` - Add a track to the queue
+- `/music enqueue filename:boss_theme.mp3 play_now:true` - Add and immediately play a track
+
+**Notes:**
+- The bot will automatically join your current voice channel if not already connected
+- Files are autocompleted from the configured music directory
+
+---
+
+### `/music control`
+Control playback of the current track in the queue.
+
+**Options:**
+- `action` (required, choice) - The control action to perform:
+  - `pause` - Pause the currently playing track
+  - `play` - Resume a paused track
+  - `stop` - Stop the current track completely
+  - `skip` - Skip to the next track in the queue
+  - `loop_toggle` - Toggle looping for the current track
+  - `leave` - Make the bot leave the voice channel
+
+**Example Usage:**
+- `/music control action:pause` - Pause playback
+- `/music control action:skip` - Skip to the next track
+- `/music control action:loop_toggle` - Enable/disable looping
+
+**Notes:**
+- Requires an active track in the queue (except for `leave`)
+- Loop toggle switches between looping and non-looping states
+
+---
+
+### `/music leave`
+Make the bot leave the current voice channel.
+
+**Example Usage:**
+- `/music leave` - Disconnect from voice channel
+
+**Notes:**
+- Stops all playback and clears the queue
+- Returns an error if the bot is not in a voice channel
+
+### Overall Notes
 
 1. Permissions are managed through the Server Integrations panel.
 2. Progress clocks are namespaced by server (guild) or by user in direct messages
